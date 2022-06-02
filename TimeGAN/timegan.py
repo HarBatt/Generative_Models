@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import torch.nn as nn
 from torch import optim
 from torch.nn import functional as F
 from itertools import chain
@@ -75,14 +74,7 @@ def train(params, dataset, embedder, generator, supervisor, recovery, discrimina
         optimizer_er.step()
 
         if step % params.print_every == 0:
-            print(
-                "step: "
-                + str(step)
-                + "/"
-                + str(max_steps)
-                + ", loss_e: "
-                + str(np.round(np.sqrt(loss_e_t0.item()), 4))
-            )
+            print("step: {}/{}, loss_e: {}".format(step, max_steps, np.round(np.sqrt(loss_e_t0.item()), 4)))
     print("Finish Embedding Network Training")
 
     print("Start Training with Supervised Loss Only")
