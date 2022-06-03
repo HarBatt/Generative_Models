@@ -4,4 +4,7 @@ This repo contains several explanations, implementations of SOTA GAN algorithms,
 
 Areas incude: 
 
-  1) Time series 
+1. Time series
+
+    * RGAN, WRGAN-GP, TimeGAN
+ 
