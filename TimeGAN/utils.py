@@ -1,26 +1,26 @@
-"""
-
------------------------------
-(1) train_test_divide: Divide train and test data for both original and synthetic data.
-(2) extract_time: Returns Maximum sequence length and each sequence length.
-(3) random_generator: random vector generator
-(4) NormMinMax: return data info
-"""
-
-from re import L
-import numpy as np
-
 class Parameters(object):
   def __init__(self):
     pass
 
 
 
+"""
+utils.py
+(1) train_test_divide: Divide train and test data for both original and synthetic data.
+(2) extract_time: Returns Maximum sequence length and each sequence length.
+(4) random_generator: random vector generator
+(5) batch_generator: mini-batch generator
+"""
+
+## Necessary Packages
+import numpy as np
+import torch
+
 
 def train_test_divide (data_x, data_x_hat, data_t, data_t_hat, train_rate = 0.8):
   """Divide train and test data for both original and synthetic data.
   
-  params:
+  Args:
     - data_x: original data
     - data_x_hat: generated data
     - data_t: original time
@@ -52,10 +52,10 @@ def train_test_divide (data_x, data_x_hat, data_t, data_t_hat, train_rate = 0.8)
   return train_x, train_x_hat, test_x, test_x_hat, train_t, train_t_hat, test_t, test_t_hat
 
 
-def extract_time (data):
+def extract_time(data):
   """Returns Maximum sequence length and each sequence length.
   
-  params:
+  Args:
     - data: original data
     
   Returns:
@@ -71,42 +71,37 @@ def extract_time (data):
   return time, max_seq_len
 
 
-def random_generator (batch_size, z_dim, T_mb, max_seq_len):
-  """Random vector generation.
+def batch_generator(data, parameters):
+  """Mini-batch generator.
   
-  params:
-    - batch_size: size of the random vector
-    - z_dim: dimension of random vector
-    - T_mb: time information for the random vector
-    - max_seq_len: maximum sequence length
+  Args:
+    - data: time-series data
+    - parameters: the dictionary which stores all the parameters
     
   Returns:
-    - Z_mb: generated random vector
+    - X_mb: time-series data in each batch
   """
-  Z_mb = list()
-  for i in range(batch_size):
-    temp = np.zeros([max_seq_len, z_dim])
-    temp_Z = np.random.uniform(0., 1, [T_mb[i], z_dim])
-    temp[:T_mb[i],:] = temp_Z
-    Z_mb.append(temp_Z)
-  return Z_mb
+  batch_size = parameters.batch_size
+  device = parameters.device
+  def generate():
+    #slicing of the 1st index(time)
+    #ori_data = np.asarray(data)[:, :, 1:]
+    #Some times you dont need to when there is no time index, ex: stock_data. 
+    ori_data = np.asarray(data)[:, :, :]
+    idx = np.random.permutation(len(ori_data)) 
 
+    for i in generator_helper(idx, batch_size):
+      X_mb = ori_data[i]
+      X_mb = torch.from_numpy(X_mb).float().to(device)
+      yield X_mb
 
-def NormMinMax(data):
-    """Min-Max Normalizer.
+  while True:
+    for sample in generate():
+      yield sample
 
-    params:
-      - data: raw data
-
-    Returns:
-      - norm_data: normalized data
-      - min_val: minimum values (for renormalization)
-      - max_val: maximum values (for renormalization)
-    """
-    min_val = np.min(np.min(data, axis=0), axis=0)
-    data = data - min_val  # [3661, 24, 6]
-
-    max_val = np.max(np.max(data, axis=0), axis=0)
-    norm_data = data / (max_val + 1e-7)
-
-    return norm_data, min_val, max_val
+def generator_helper(train_idx, batch_size):
+    for i in range(0, len(train_idx), batch_size):
+        data = train_idx[i:i + batch_size]
+        if len(data) != batch_size:
+            break
+        yield data 
