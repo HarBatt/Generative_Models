@@ -25,7 +25,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ## Data loading
 data_path = "data/"
-dataset = "stock"
+dataset = "energy"
 path_real_data = "data/" + dataset + "_data.csv"
 #Evaluation of the model, by default can be set to false.
 eval_model = False
@@ -33,7 +33,7 @@ eval_model = False
 #parameters
 
 params = Parameters()
-params.dataset = "stock"
+params.dataset = dataset
 params.data_path = "data/" + params.dataset + "_data.csv"
 params.model_save_path = "saved_models/" + params.dataset
 params.seq_len = 24
@@ -55,9 +55,8 @@ Method: real_data_loading()
     - Slices the data into windows of size seq_len.
     - Shuffles the data randomly, and returns it.
 """
-ori_data = real_data_loading(path_real_data, params.seq_len)
+ori_data, (minimum, maximum) = real_data_loading(path_real_data, params.seq_len)
 
-print(ori_data.shape)
 params.input_size = ori_data[0].shape[1]
 params.hidden_size = 24
 params.num_layers = 3
@@ -75,7 +74,11 @@ Method: timegan()
 ---------------------------------------------------------------------------------------------------------------------
     - Runs the timegan model.
 """
-generated_data = timegan(ori_data, params)   
-print(generated_data.shape)
+generated_data = timegan(ori_data, params)  
+
+# # Renormalization
+# generated_data = generated_data*maximum
+# generated_data = generated_data + minimum 
+
 with open(data_path + params.dataset + '_synthetic_data.npy', 'wb') as f:
     np.save(f, np.array(generated_data))

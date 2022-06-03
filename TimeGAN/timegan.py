@@ -173,16 +173,13 @@ def timegan(ori_data, params):
         if step % params.print_every == 0:
             print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", loss_d: "+ str(np.round(loss_d.item(), 4))+ ", loss_g_u: "+ str(np.round(loss_g_u.item(), 4))+ ", loss_g_v: "+ str(np.round(loss_g_v.item(), 4))+ ", loss_s: "+ str(np.round(np.sqrt(loss_s.item()), 4))+ ", loss_e_t0: "+ str(np.round(np.sqrt(loss_e_t0.item()), 4)))
     print("Finish Joint Training")
+    
     x = data_gen.__next__()
-    #print(x.shape)
     z = torch.randn(ori_data.shape[0], x.size(1), x.size(2)).to(params.device)
     e_hat = generator(z)
-    #print("e_hat: {}".format(e_hat.shape))
     h_hat = supervisor(e_hat)
-    #print("h_hat: {}".format(h_hat.shape))
     h_hat_supervise = supervisor(h)
     x_hat = recovery(h_hat)
-    #print("x_hat: {}".format(x_hat.shape))
     
     synthetic_samples = x_hat.detach().cpu().numpy()
     return synthetic_samples

@@ -16,10 +16,11 @@ def MinMaxScaler(data):
   Returns:
     - norm_data: normalized data
   """
-  numerator = data - np.min(data, 0)
-  denominator = np.max(data, 0) - np.min(data, 0)
+  minimum, maximum = np.min(data, 0), np.max(data, 0)
+  numerator = data - minimum
+  denominator = maximum - minimum
   norm_data = numerator / (denominator + 1e-7)
-  return norm_data
+  return norm_data, (minimum, maximum)
 
 
   
@@ -38,7 +39,7 @@ def real_data_loading (absolute_path, seq_len):
   # Flip the data to make chronological data
   ori_data = ori_data[::-1]
   # Normalize the data
-  ori_data = MinMaxScaler(ori_data)
+  ori_data, (minimum, maximum) = MinMaxScaler(ori_data)
     
   # Preprocess the dataset
   temp_data = []    
@@ -53,4 +54,4 @@ def real_data_loading (absolute_path, seq_len):
   for i in range(len(temp_data)):
     data.append(temp_data[idx[i]])
     
-  return np.array(data)
+  return np.array(data), (minimum, maximum)
