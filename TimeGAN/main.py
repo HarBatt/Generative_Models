@@ -76,6 +76,6 @@ Method: timegan()
     - Runs the timegan model.
 """
 generated_data = timegan(ori_data, params)   
-
+print(generated_data.shape)
 with open(data_path + params.dataset + '_synthetic_data.npy', 'wb') as f:
     np.save(f, np.array(generated_data))
