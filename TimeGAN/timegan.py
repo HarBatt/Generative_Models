@@ -2,17 +2,18 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch import optim
-from torch.nn import functional as F
 from itertools import chain
 from utils import batch_generator
 
+
 class RNNnet(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_layers, activation_fn=torch.sigmoid):
-        super().__init__()
-        self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
-        self.linear = nn.Linear(hidden_size, output_size)
+        super(RNNnet, self).__init__()
+        self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True, bias = False)
+        self.linear = nn.Linear(hidden_size, output_size, bias = False)
         self.activation_fn = activation_fn
-
+        nn.init.xavier_uniform_(self.linear.weight)
+        
     def forward(self, x):
         x, _ = self.rnn(x)
         x = self.linear(x)
@@ -23,40 +24,50 @@ class RNNnet(nn.Module):
 class Loss:
     def __init__(self, params):
         self.params = params
+        self.mse = nn.MSELoss()
+        self.bce = nn.BCEWithLogitsLoss()
 
-    def loss_e_t0(self, x_tilde, x):
-        return F.mse_loss(x_tilde, x)
+    def E_loss_T0(self, x_tilde, x):
+        #Embedder Network loss
+        return self.mse(x_tilde, x)
+    
+    def E_loss0(self, E_loss_T0):
+        #Embedder Network loss
+        return 10*torch.sqrt(E_loss_T0)
 
-    def loss_e_0(self, loss_e_t0):
-        return torch.sqrt(loss_e_t0) * 10
+    def E_loss(self, E_loss0, G_loss_S):
+        #Embedder Network loss
+        return E_loss0 + 0.1*G_loss_S
 
-    def loss_e(self, loss_e_0, loss_s):
-        return loss_e_0 + 0.1* loss_s
+    def G_loss_S(self, h, h_hat_supervise):
+        # Supervised loss
+        return self.mse(h[:, 1:, :], h_hat_supervise[:,:-1,:])
 
-    def loss_s(self, h_hat_supervise, h):
-        return F.mse_loss(h[:, 1:, :], h_hat_supervise[:, 1:, :])
+    # Generator Losses
+    def G_loss_U(self, y_fake):
+        # Adversarial loss
+        return self.bce(y_fake, torch.ones_like(y_fake))
 
-    def loss_g_u(self, y_fake):
-        return F.binary_cross_entropy_with_logits(y_fake, torch.ones_like(y_fake))
+    def G_loss_U_e(self, y_fake_e):
+        # Adversarial loss
+        return self.bce(y_fake_e, torch.ones_like(y_fake_e))
 
-    def loss_g_u_e(self, y_fake_e):
-        return F.binary_cross_entropy_with_logits(y_fake_e, torch.ones_like(y_fake_e))
+    def G_loss_V(self, x_hat, x):
+        # Two Momments
+        G_loss_V1 = torch.mean(torch.abs(torch.sqrt(torch.var(x_hat, 0) + 1e-6) - torch.sqrt(torch.var(x, 0) + 1e-6)))
+        G_loss_V2 = torch.mean(torch.abs(torch.mean(x_hat, 0) - torch.mean(x, 0)))
+        return G_loss_V1 + G_loss_V2
 
-    def loss_g_v(self, x_hat, x):
-        loss_g_v1 = torch.mean(
-            torch.abs(torch.sqrt(torch.var(x_hat, 0) + 1e-6) - torch.sqrt(torch.var(x, 0) + 1e-6))
-        )
-        loss_g_v2 = torch.mean(torch.abs(torch.mean(x_hat, 0) - torch.mean(x, 0)))
-        return loss_g_v1 + loss_g_v2
+    def G_loss(self, G_loss_U, G_loss_U_e, G_loss_S, G_loss_V):
+        # Summation of G loss
+        return G_loss_U + self.params.gamma*G_loss_U_e + 100*torch.sqrt(G_loss_S) + 100*G_loss_V
 
-    def loss_g(self, loss_g_u, loss_g_u_e, loss_s, loss_g_v):
-        return loss_g_u + self.params.gamma * loss_g_u_e + 100 * torch.sqrt(loss_s) + 100 * loss_g_v
-
-    def loss_d(self, y_real, y_fake, y_fake_e):
-        loss_d_real = F.binary_cross_entropy_with_logits(y_real, torch.ones_like(y_real))
-        loss_d_fake = F.binary_cross_entropy_with_logits(y_fake, torch.zeros_like(y_fake))
-        loss_d_fake_e = F.binary_cross_entropy_with_logits(y_fake_e, torch.zeros_like(y_fake_e))
-        return loss_d_real + loss_d_fake + self.params.gamma * loss_d_fake_e
+    def D_loss(self, y_real, y_fake, y_fake_e): 
+        # Discriminator loss
+        D_loss_real = self.bce(y_real, torch.ones_like(y_real))
+        D_loss_fake = self.bce(y_fake, torch.zeros_like(y_fake))
+        D_loss_fake_e = self.bce(y_fake_e, torch.zeros_like(y_fake_e))
+        return D_loss_real + D_loss_fake + self.params.gamma*D_loss_fake_e
 
 def timegan(ori_data, params):
     embedder = RNNnet(params.input_size, params.hidden_size, params.hidden_size, params.num_layers).to(params.device)
@@ -83,103 +94,109 @@ def timegan(ori_data, params):
     data_gen = batch_generator(ori_data, params)
 
     print("Start Embedding Network Training")
-    for step in range(1, params.max_steps + 1):
+    for step in range(params.max_steps):
         # Get the real batch data, and synthetic batch data. 
         x = data_gen.__next__() 
         h = embedder(x)
+        #Embedding = h.shape = (batch_size = 128, seq_len = 24,  24)
         x_tilde = recovery(h)
-        loss_e_t0 = loss.loss_e_t0(x_tilde, x)
-        loss_e_0 = loss.loss_e_0(loss_e_t0)
+        #Recovery = x_tilde.shape = (batch_size = 128, seq_len = 24, 28)
+        E_loss_T0 = loss.E_loss_T0(x_tilde, x)
+        E_loss0 = loss.E_loss0(E_loss_T0)
         optimizer_er.zero_grad()
-        loss_e_0.backward()
+        E_loss0.backward()
         optimizer_er.step()
 
         if step % params.print_every == 0:
-            print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", loss_e: "+ str(np.round(np.sqrt(loss_e_t0.item()), 4)))
+            print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", e_loss: "+ str(np.round(np.sqrt(E_loss_T0.item()), 4)))
+            
     print("Finish Embedding Network Training")
 
     print("Start Training with Supervised Loss Only")
-    for step in range(1, params.max_steps + 1):
+    for step in range(params.max_steps):
         # Get the real batch data, and synthetic batch data. 
         x = data_gen.__next__()
-        z = torch.randn(x.size(0), x.size(1), x.size(2)).to(params.device)
-        #print(z.shape)
         h = embedder(x)
         h_hat_supervise = supervisor(h)
 
-        loss_s = loss.loss_s(h_hat_supervise, h)
+        G_loss_S = loss.G_loss_S(h, h_hat_supervise)
         optimizer_gs.zero_grad()
-        loss_s.backward()
+        G_loss_S.backward()
         optimizer_gs.step()
 
         if step % params.print_every == 0:
-            print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", loss_s: "+ str(np.round(np.sqrt(loss_s.item()), 4)))
+            print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", s_loss: "+ str(np.round(np.sqrt(G_loss_S.item()), 4)))
     print("Finish Training with Supervised Loss Only")
 
     print("Start Joint Training")
-    for step in range(1, params.max_steps + 1):
+    for step in range(params.max_steps):
         for _ in range(2):
+            # Train the Generator
             x = data_gen.__next__()
             z = torch.randn(x.size(0), x.size(1), x.size(2)).to(params.device)
 
             h = embedder(x)
             e_hat = generator(z)
-            #print("e_hat: {}".format(e_hat.shape))
             h_hat = supervisor(e_hat)
-            #print("h_hat: {}".format(h_hat.shape))
             h_hat_supervise = supervisor(h)
             x_hat = recovery(h_hat)
-            #print("x_hat: {}".format(x_hat.shape))
+
             y_fake = discriminator(h_hat)
             y_fake_e = discriminator(e_hat)
 
-            loss_s = loss.loss_s(h_hat_supervise, h)
-            loss_g_u = loss.loss_g_u(y_fake)
-            loss_g_u_e = loss.loss_g_u_e(y_fake_e)
-            loss_g_v = loss.loss_g_v(x_hat, x)
-            loss_g = loss.loss_g(loss_g_u, loss_g_u_e, loss_s, loss_g_v)
+            G_loss_U = loss.G_loss_U(y_fake)
+            G_loss_U_e = loss.G_loss_U_e(y_fake_e)
+            G_loss_S = loss.G_loss_S(h, h_hat_supervise)
+            G_loss_V = loss.G_loss_V(x_hat, x)
+
+            G_loss = loss.G_loss(G_loss_U, G_loss_U_e, G_loss_S, G_loss_V)
             optimizer_gs.zero_grad()
-            loss_g.backward()
+            G_loss.backward()
             optimizer_gs.step()
 
+            # Train the Embedder
             h = embedder(x)
             x_tilde = recovery(h)
             h_hat_supervise = supervisor(h)
 
-            loss_e_t0 = loss.loss_e_t0(x_tilde, x)
-            loss_e_0 = loss.loss_e_0(loss_e_t0)
-            loss_s = loss.loss_s(h_hat_supervise, h)
-            loss_e = loss.loss_e(loss_e_0, loss_s)
+            E_loss_T0 = loss.E_loss_T0(x_tilde, x)
+            E_loss0 = loss.E_loss0(E_loss_T0)
+            G_loss_S = loss.G_loss_S(h, h_hat_supervise)
+            E_loss = loss.E_loss(E_loss0, G_loss_S)
             optimizer_er.zero_grad()
-            loss_e.backward()
+            E_loss.backward()
             optimizer_er.step()
 
+        # Discriminator training 
         x = data_gen.__next__()
         z = torch.randn(x.size(0), x.size(1), x.size(2)).to(params.device)
-
+        
         h = embedder(x)
         e_hat = generator(z)
         h_hat = supervisor(e_hat)
-        y_fake = discriminator(h_hat)
+        
         y_real = discriminator(h)
+        y_fake = discriminator(h_hat)
         y_fake_e = discriminator(e_hat)
 
-        loss_d = loss.loss_d(y_real, y_fake, y_fake_e)
+        loss_d = loss.D_loss(y_real, y_fake, y_fake_e)
+
+        # Train discriminator (only when the discriminator does not work well)
         if loss_d.item() > 0.15:
             optimizer_d.zero_grad()
             loss_d.backward()
             optimizer_d.step()
 
         if step % params.print_every == 0:
-            print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", loss_d: "+ str(np.round(loss_d.item(), 4))+ ", loss_g_u: "+ str(np.round(loss_g_u.item(), 4))+ ", loss_g_v: "+ str(np.round(loss_g_v.item(), 4))+ ", loss_s: "+ str(np.round(np.sqrt(loss_s.item()), 4))+ ", loss_e_t0: "+ str(np.round(np.sqrt(loss_e_t0.item()), 4)))
+            print("step: "+ str(step)+ "/"+ str(params.max_steps)+ ", d_loss: "+ str(np.round(loss_d.item(), 4))+ ", g_loss_u: "+ str(np.round(G_loss_U.item(), 4))+  ", g_loss_s: "+ str(np.round(np.sqrt(G_loss_S.item()), 4))+ ", g_loss_v: "+ str(np.round(G_loss_V.item(), 4))+ ", e_loss_t0: "+ str(np.round(np.sqrt(E_loss_T0.item()), 4)))
     print("Finish Joint Training")
     
-    x = data_gen.__next__()
-    z = torch.randn(ori_data.shape[0], x.size(1), x.size(2)).to(params.device)
-    e_hat = generator(z)
-    h_hat = supervisor(e_hat)
-    h_hat_supervise = supervisor(h)
-    x_hat = recovery(h_hat)
-    
-    synthetic_samples = x_hat.detach().cpu().numpy()
-    return synthetic_samples
+    with torch.no_grad():
+        x = data_gen.__next__()
+        z = torch.randn(ori_data.shape[0], x.size(1), x.size(2)).to(params.device)
+        e_hat = generator(z)
+        h_hat = supervisor(e_hat)
+        x_hat = recovery(h_hat)
+        
+        synthetic_samples = x_hat.detach().cpu().numpy()
+        return synthetic_samples

@@ -8,17 +8,12 @@ import torch
 import warnings
 warnings.filterwarnings("ignore")
 
-# 1. RGAN model
+# 1. TimeGAN model
 from timegan import timegan
 # 2. Data loading
 from data_loading import real_data_loading
-# 3. Metrics
-from metrics.visualization_metrics import visualization
-# 4. Utils
+# 3. Utils
 from utils import Parameters
-
-
-
 
 #set the device 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -27,8 +22,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 data_path = "data/"
 dataset = "energy"
 path_real_data = "data/" + dataset + "_data.csv"
-#Evaluation of the model, by default can be set to false.
-eval_model = False
 
 #parameters
 
@@ -41,7 +34,7 @@ params.batch_size = 128
 params.max_steps = 10000
 params.gamma = 1.0
 params.save_model = True
-params.print_every = 500
+params.print_every = 750
 params.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 params.save_synth_data = False
 
