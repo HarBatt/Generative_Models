@@ -7,4 +7,7 @@ Areas incude:
 1. Time series
 
     * RGAN, WRGAN-GP, TimeGAN
- 
+
+2. Images
+
+   * CGAN
